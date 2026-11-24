@@ -321,40 +321,10 @@ final class Settings extends Module_Settings {
                         $option['googleTagID'] = '';
                     }
                 }
-
-                // Sanitize property ID
-                if ( isset( $option['propertyID'] ) ) {
-                    $option['propertyID'] = $this->sanitize_property_id( $option['propertyID'] );
-                }
-
-                // Sanitize owner ID
-                if ( isset( $option['ownerID'] ) ) {
-                    $option['ownerID'] = (int) $option['ownerID'];
-                }
             }
 
             return $option;
         };
-    }
-
-    /**
-     * Sanitize property ID.
-     *
-     * \@param string $property_id Property ID to sanitize.
-     * \@return string Sanitized property ID.
-     */
-    private function sanitize_property_id( $property_id ) {
-        // Allow special values
-        if ( in_array( $property_id, array( self::PROPERTY_CREATE ), true ) ) {
-            return $property_id;
-        }
-
-        // Validate format: properties/123456789
-        if ( ! preg_match( '/^properties\/\d+$/', $property_id ) ) {
-            return '';
-        }
-
-        return $property_id;
     }
 }
 ```
@@ -566,42 +536,47 @@ Settings can be validated before saving using custom sanitization callbacks.
 ```php
 protected function get_sanitize_callback() {
     return function ( $option ) {
-        if ( ! is_array( $option ) ) {
-            return $this->get_default();
-        }
+        if ( is_array( $option ) ) {
+            // Cast trackingDisabled to an array when it is set. If the list contains
+            // 'loggedinUsers', keep only that value.
+            if ( isset( $option['trackingDisabled'] ) ) {
+                $tracking_disabled = (array) $option['trackingDisabled'];
 
-        // Validate measurement ID format
-        if ( isset( $option['measurementID'] ) ) {
-            if ( ! preg_match( '/^G-[A-Z0-9]+$/', $option['measurementID'] ) ) {
-                // Invalid format, keep old value
-                $old_settings = $this->get();
-                $option['measurementID'] = $old_settings['measurementID'];
+                if ( in_array( 'loggedinUsers', $tracking_disabled, true ) ) {
+                    $option['trackingDisabled'] = array( 'loggedinUsers' );
+                } else {
+                    $option['trackingDisabled'] = $tracking_disabled;
+                }
+            }
+
+            // Keep only the custom dimensions that are strings starting with
+            // 'googlesitekit_'. A value that is not an array becomes null.
+            if ( isset( $option['availableCustomDimensions'] ) ) {
+                if ( is_array( $option['availableCustomDimensions'] ) ) {
+                    $option['availableCustomDimensions'] = array_values(
+                        array_filter(
+                            $option['availableCustomDimensions'],
+                            function ( $dimension ) {
+                                return is_string( $dimension ) && strpos( $dimension, 'googlesitekit_' ) === 0;
+                            }
+                        )
+                    );
+                } else {
+                    $option['availableCustomDimensions'] = null;
+                }
             }
         }
 
-        // Ensure trackingDisabled is always an array
-        if ( ! isset( $option['trackingDisabled'] ) || ! is_array( $option['trackingDisabled'] ) ) {
-            $option['trackingDisabled'] = array();
-        }
-
-        // Validate custom dimensions
-        if ( isset( $option['availableCustomDimensions'] ) ) {
-            if ( ! is_array( $option['availableCustomDimensions'] ) ) {
-                $option['availableCustomDimensions'] = null;
-            } else {
-                $option['availableCustomDimensions'] = array_values(
-                    array_filter(
-                        $option['availableCustomDimensions'],
-                        'is_string'
-                    )
-                );
-            }
-        }
-
+        // An option that is not an array is returned unchanged.
         return $option;
     };
 }
 ```
+
+> Note: This example follows the Analytics 4 sanitizer in
+> `includes/Modules/Analytics_4/Settings.php`. That sanitizer saves `propertyID` and
+> `measurementID` as given, with no check of their format, and returns an option that is
+> not an array unchanged.
 
 ## Settings Patterns
 
